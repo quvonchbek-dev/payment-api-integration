@@ -51,7 +51,7 @@ def check_invoice_status(invoice_id):
 
 
 def check_payment_status(payment_id):
-    endpoint = f'payment/status/{service_id}/{payment_id}'
+    endpoint = f'payment/status/{service_id}/{123}'
     url = base_url + endpoint
     headers = {
         'Accept': 'application/json',
@@ -152,15 +152,13 @@ def delete_card_token(card_token):
 
 
 def main():
-    # print(create_invoice(1000, '+998904613136', 1))
+    # print(create_invoice(1000, '+998940048052', 1))
+    # Sh {'error_code': 0, 'error_note': '', 'invoice_id': 144486390, 'eps_id': '0064'}
     # {'error_code': 0, 'error_note': '', 'invoice_id': 143265938, 'eps_id': '0064'} 🟢
     # {'error_code': 0, 'error_note': '', 'invoice_id': 143265965, 'eps_id': '0064'}
     # {'error_code': 0, 'error_note': '', 'invoice_id': 143265271, 'eps_id': '0064'}
     # {'error_code': 0, 'error_note': '', 'invoice_id': 143265594, 'eps_id': '0064'}
-    payment_id = 2702080657  # 🟢
-    # payment_id = check_invoice_status(143265938)['payment_id']
-    print(payment_id)
-    print(check_payment_status(payment_id))
+    print(check_invoice_status(143265938))
 
 
 if __name__ == '__main__':

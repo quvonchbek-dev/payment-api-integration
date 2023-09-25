@@ -1,5 +1,11 @@
 import datetime
 
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from django.conf import settings
+import hashlib
+from .models import Payment, ClickTransaction
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.utils import timezone
@@ -92,3 +98,68 @@ def process_payment(request):
     else:
         data["error"] = ["already_paid", "order_cancelled", "order_expired"][order.status - 1]
     return Response(data)
+
+
+from django.http import JsonResponse
+import hashlib
+from .models import ClickTransaction
+
+SECRET_KEY = "YOUR_SECRET_KEY"  # Replace with your actual secret key
+
+
+def check_signature(data):
+    if data['action'] == 0:  # Prepare
+        sign_string = f"{data['click_trans_id']}{data['service_id']}{SECRET_KEY}{data['merchant_trans_id']}{data['amount']}{data['action']}{data['sign_time']}"
+    elif data['action'] == 1:  # Complete
+        sign_string = f"{data['click_trans_id']}{data['service_id']}{SECRET_KEY}{data['merchant_trans_id']}{data['merchant_prepare_id']}{data['amount']}{data['action']}{data['sign_time']}"
+    else:
+        return
+    return hashlib.md5(sign_string.encode('utf-8')).hexdigest()
+
+
+@require_POST
+def prepare(request):
+    data = request.POST
+
+    # Check Signature
+    if check_signature(data) != data['sign_string']:
+        return JsonResponse({
+            "error": -1,
+            "error_note": "SIGN CHECK FAILED!"
+        })
+
+    order = Order.objects.get()
+    # Logic to verify the payment here. You might need to interact with your main system or database to check the payment details.
+    # For now, I'll assume that the payment verification is always successful.
+
+    # Assuming everything went well, return a success response
+    return JsonResponse({
+        "error": 0,
+        "error_note": "Success",
+        "click_trans_id": data['click_trans_id'],
+        "merchant_trans_id": data['merchant_trans_id'],
+        "merchant_prepare_id": 12345  # Replace with an actual ID from your system
+    })
+
+
+@require_POST
+def complete(request):
+    data = request.POST
+
+    # Check Signature
+    if check_signature(data) != data['sign_string']:
+        return JsonResponse({
+            "error": -1,
+            "error_note": "SIGN CHECK FAILED!"
+        })
+
+    # Logic to complete the payment here. Again, you might need to interact with your main system or database.
+
+    # Assuming everything went well, return a success response
+    return JsonResponse({
+        "error": 0,
+        "error_note": "Success",
+        "click_trans_id": data['click_trans_id'],
+        "merchant_trans_id": data['merchant_trans_id'],
+        "merchant_confirm_id": 67890  # Replace with an actual ID from your system
+    })

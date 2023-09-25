@@ -73,3 +73,23 @@ class Order(models.Model):
 class Payment(models.Model):
     order = models.ForeignKey(Order, models.CASCADE, 'payments')
     transactionId = models.CharField(max_length=255)
+
+
+class ClickTransaction(models.Model):
+    click_trans_id = models.BigIntegerField(unique=True)
+    service_id = models.IntegerField()
+    click_paydoc_id = models.BigIntegerField()
+    merchant_trans_id = models.CharField(max_length=255)
+    amount = models.FloatField()
+    action = models.IntegerField()
+    error = models.IntegerField()
+    error_note = models.CharField(max_length=255)
+    sign_time = models.DateTimeField()
+    sign_string = models.CharField(max_length=255)
+    merchant_prepare_id = models.IntegerField(null=True, blank=True)
+    merchant_confirm_id = models.IntegerField(null=True, blank=True)
+
+
+
+    def __str__(self):
+        return str(self.click_trans_id)
