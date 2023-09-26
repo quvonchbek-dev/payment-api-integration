@@ -68,7 +68,7 @@ class Order(models.Model):
     payment_app = models.CharField(max_length=10, choices=PaymentAppType.choices, default=PaymentAppType.UZUM)
 
     def __str__(self):
-        return f"{str(self.id)} - {self.owner.name}"
+        return f"{self.id}"
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
@@ -92,6 +92,10 @@ class ClickPayment(models.Model):
     transactionId = models.BigIntegerField()
     action = models.IntegerField(choices=ActionTypes.choices, default=0)
     sign_time = models.DateTimeField()
+
+    @property
+    def status(self):
+        return ["WAITING", "PAID", "CANCELLED", "EXPIRED"][self.order.status]
 
     def __str__(self):
         return f"{self.order.id} | {self.order.owner.name} | {self.order.amount}"

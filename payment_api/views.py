@@ -1,7 +1,6 @@
 import datetime
 import os
 
-import pytz
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.utils import timezone
@@ -10,6 +9,10 @@ from payment_api.serializers import CheckPaymentSerializerUzum, PaymentSerialize
     ClickPrepareSerializer
 from django.http import JsonResponse
 import hashlib
+
+"""
+UUM
+"""
 
 
 @api_view(['POST'])
@@ -99,6 +102,9 @@ def process_payment(request):
     return Response(data)
 
 
+"""
+CLICK API
+"""
 SECRET_KEY = os.getenv("CLICK_SECRET_KEY")
 
 
@@ -117,9 +123,6 @@ def check_signature(data):
     return hashlib.md5(sign_string.encode('utf-8')).hexdigest()
 
 
-"""
-CLICK API
-"""
 CLICK_ERRORS = {
     0: "Success",
     -1: "SIGN CHECK FAILED!",
@@ -138,6 +141,8 @@ def get_error_code(order: Order, data) -> int:
     if order is None:
         return -6
     if data["error"] < 0:
+        order.status = Order.Status.CANCELLED
+        order.save()
         return -9
     if order.amount != data["amount"]:
         return -2
@@ -165,26 +170,20 @@ def click_prepare(request):
     if err_code < 0:
         return send_error(-9)
 
-    sign_str = check_signature(data)
-    if sign_str != data['sign_string']:
-        return JsonResponse({
-            "error": -1,
-            "error_note": "SIGN CHECK FAILED!"
-        })
+    if check_signature(data) != data['sign_string']:
+        return send_error(-1)
     action = data["action"]
 
     if action != 0:
         return send_error(-3)
 
-    order_id = data["merchant_trans_id"]
-    if len(order_id) > 18 or int(order_id) > 9223372036854775807:
+    order_id: str = data["merchant_trans_id"]
+    if not order_id.isnumeric() or len(order_id) > 18 or abs(int(order_id)) > 9223372036854775807:
         return send_error(-5)
     order: Order = Order.objects.filter(pk=order_id).first()
     error = get_error_code(order, data)
     if error:
-        return JsonResponse({
-            "error": error, "error_note": CLICK_ERRORS[error]
-        })
+        return send_error(error)
     try:
         click_pay: ClickPayment = ClickPayment.objects.create(
             order=order,
@@ -193,9 +192,7 @@ def click_prepare(request):
             action=action
         )
     except Exception:
-        return JsonResponse({
-            "error": -8, "error_note": CLICK_ERRORS[-8]
-        })
+        return send_error(-8)
 
     return JsonResponse({
         "error": error,
@@ -211,30 +208,23 @@ def click_complete(request):
     serializer = ClickCompleteSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
-    sign_str = check_signature(data)
-    if sign_str != data['sign_string']:
-        return JsonResponse({
-            "error": -1,
-            "error_note": "SIGN CHECK FAILED!"
-        })
-    action = data["action"]
-    if action != 1:
-        return JsonResponse({
-            "error": -3,
-            "error_note": CLICK_ERRORS[-3]
-        })
+
+    if check_signature(data) != data['sign_string']:
+        return send_error(-1)
+
+    if data["action"] != 1:
+        return send_error(-3)
 
     merchant_prepare_id = data["merchant_prepare_id"]
     click_pay: ClickPayment = ClickPayment.objects.filter(pk=merchant_prepare_id).first()
+
     if click_pay is None:
         return send_error(-6)
 
     order = click_pay.order
     error = get_error_code(order, data)
     if error:
-        return JsonResponse({
-            "error": error, "error_note": CLICK_ERRORS[error]
-        })
+        return send_error(error)
 
     order.status = Order.Status.PAID
     order.payment_app = Order.PaymentAppType.CLICK
