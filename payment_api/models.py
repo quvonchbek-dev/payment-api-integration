@@ -1,7 +1,6 @@
 from django.db import models
 
 
-
 class User(models.Model):
     users = models.Manager()
     name = models.CharField(verbose_name="Полное имя", null=True, blank=True, max_length=100)
@@ -47,7 +46,7 @@ class User(models.Model):
 class Order(models.Model):
     class Status(models.IntegerChoices):
         WAITING = 0
-        USED = 1
+        PAID = 1
         CANCELLED = 2
         EXPIRED = 3
 
@@ -56,12 +55,17 @@ class Order(models.Model):
         SEARCH = 1
         ALL = 2
 
+    class PaymentAppType(models.TextChoices):
+        UZUM = "uzum"
+        CLICK = "click"
+        PAYME = "payme"
+
     owner = models.ForeignKey(User, related_name="orders", on_delete=models.CASCADE)
-    # error = models.CharField(max_length=30, choices=Error.choices, blank=True)
     status = models.IntegerField(choices=Status.choices, default=Status.WAITING)
     amount = models.BigIntegerField()
     payment_for = models.IntegerField(choices=OrderTypes.choices, default=OrderTypes.ALL)
     created_at = models.DateTimeField(editable=True, auto_now_add=True)
+    payment_app = models.CharField(max_length=10, choices=PaymentAppType.choices, default=PaymentAppType.UZUM)
 
     def __str__(self):
         return f"{str(self.id)} - {self.owner.name}"
@@ -73,23 +77,21 @@ class Order(models.Model):
 class Payment(models.Model):
     order = models.ForeignKey(Order, models.CASCADE, 'payments')
     transactionId = models.CharField(max_length=255)
-
-
-class ClickTransaction(models.Model):
-    click_trans_id = models.BigIntegerField(unique=True)
-    service_id = models.IntegerField()
-    click_paydoc_id = models.BigIntegerField()
-    merchant_trans_id = models.CharField(max_length=255)
-    amount = models.FloatField()
-    action = models.IntegerField()
-    error = models.IntegerField()
-    error_note = models.CharField(max_length=255)
-    sign_time = models.DateTimeField()
-    sign_string = models.CharField(max_length=255)
-    merchant_prepare_id = models.IntegerField(null=True, blank=True)
-    merchant_confirm_id = models.IntegerField(null=True, blank=True)
-
-
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return str(self.click_trans_id)
+        return f"{self.order.amount} sum - {self.order.owner.name}"
+
+
+class ClickPayment(models.Model):
+    class ActionTypes(models.IntegerChoices):
+        PREPARING = 0
+        COMPLETE = 1
+
+    order = models.ForeignKey(Order, models.CASCADE, 'click_payment')
+    transactionId = models.BigIntegerField()
+    action = models.IntegerField(choices=ActionTypes.choices, default=0)
+    sign_time = models.DateTimeField()
+
+    def __str__(self):
+        return f"{self.order.id} | {self.order.owner.name} | {self.order.amount}"

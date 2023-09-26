@@ -1,21 +1,20 @@
 import datetime
+import os
 
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
-from django.conf import settings
-import hashlib
-from .models import Payment, ClickTransaction
+import pytz
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.utils import timezone
-from payment_api.models import Order, Payment
-from payment_api.serializers import CheckPaymentSerializer, PaymentSerializer
+from payment_api.models import Order, Payment, ClickPayment
+from payment_api.serializers import CheckPaymentSerializerUzum, PaymentSerializer, ClickCompleteSerializer, \
+    ClickPrepareSerializer
+from django.http import JsonResponse
+import hashlib
 
 
 @api_view(['POST'])
 def check_payment(request):
-    serializer = CheckPaymentSerializer(data=request.data)
+    serializer = CheckPaymentSerializerUzum(data=request.data)
     serializer.is_valid(raise_exception=True)
 
     order_id = request.data.get('orderId')
@@ -32,7 +31,7 @@ def check_payment(request):
     if order_qs.exists():
         order = order_qs.first()
 
-        if order.status == Order.Status.USED:
+        if order.status == Order.Status.PAID:
             data["error"] = "already_paid"
         elif order.status == Order.Status.EXPIRED:
             data["error"] = "order_expired"
@@ -87,7 +86,7 @@ def process_payment(request):
                     transactionId=transaction_id,
                 )
                 data["status"] = True
-                order.status = Order.Status.USED
+                order.status = Order.Status.PAID
                 order.save()
             except Exception as ex:
                 data["error"] = str(ex)
@@ -100,66 +99,154 @@ def process_payment(request):
     return Response(data)
 
 
-from django.http import JsonResponse
-import hashlib
-from .models import ClickTransaction
-
-SECRET_KEY = "YOUR_SECRET_KEY"  # Replace with your actual secret key
+SECRET_KEY = os.getenv("CLICK_SECRET_KEY")
 
 
 def check_signature(data):
+    amount = data["amount"]
+    if amount % 1 == 0:
+        amount = int(amount)
     if data['action'] == 0:  # Prepare
-        sign_string = f"{data['click_trans_id']}{data['service_id']}{SECRET_KEY}{data['merchant_trans_id']}{data['amount']}{data['action']}{data['sign_time']}"
+        sign_string = (f"{data['click_trans_id']}{data['service_id']}{SECRET_KEY}{data['merchant_trans_id']}"
+                       f"{int(amount)}{data['action']}{data['sign_time']}")
     elif data['action'] == 1:  # Complete
-        sign_string = f"{data['click_trans_id']}{data['service_id']}{SECRET_KEY}{data['merchant_trans_id']}{data['merchant_prepare_id']}{data['amount']}{data['action']}{data['sign_time']}"
+        sign_string = (f"{data['click_trans_id']}{data['service_id']}{SECRET_KEY}{data['merchant_trans_id']}"
+                       f"{data['merchant_prepare_id']}{amount}{data['action']}{data['sign_time']}")
     else:
         return
     return hashlib.md5(sign_string.encode('utf-8')).hexdigest()
 
 
-@require_POST
-def prepare(request):
-    data = request.POST
+"""
+CLICK API
+"""
+CLICK_ERRORS = {
+    0: "Success",
+    -1: "SIGN CHECK FAILED!",
+    -2: "Incorrect parameter amount",
+    -3: "Action not found",
+    -4: "Already paid",
+    -5: "User does not exist",
+    -6: "Transaction does not exist",
+    -7: "Failed to update user",
+    -8: "Error in request from click",
+    -9: "Transaction cancelled",
+}
 
-    # Check Signature
-    if check_signature(data) != data['sign_string']:
-        return JsonResponse({
-            "error": -1,
-            "error_note": "SIGN CHECK FAILED!"
-        })
 
-    order = Order.objects.get()
-    # Logic to verify the payment here. You might need to interact with your main system or database to check the payment details.
-    # For now, I'll assume that the payment verification is always successful.
+def get_error_code(order: Order, data) -> int:
+    if order is None:
+        return -6
+    if data["error"] < 0:
+        return -9
+    if order.amount != data["amount"]:
+        return -2
+    if order.status == Order.Status.PAID:
+        return -4
+    if order.status == Order.Status.CANCELLED:
+        return -9
+    return 0
 
-    # Assuming everything went well, return a success response
+
+def send_error(error):
     return JsonResponse({
-        "error": 0,
-        "error_note": "Success",
-        "click_trans_id": data['click_trans_id'],
-        "merchant_trans_id": data['merchant_trans_id'],
-        "merchant_prepare_id": 12345  # Replace with an actual ID from your system
+        "error": error,
+        "error_note": CLICK_ERRORS[error]
     })
 
 
-@require_POST
-def complete(request):
-    data = request.POST
+# Prepare
+@api_view(['POST'])
+def click_prepare(request):
+    sz = ClickPrepareSerializer(data=request.data)
+    sz.is_valid(raise_exception=True)
+    data = sz.validated_data
+    err_code = data["error"]
+    if err_code < 0:
+        return send_error(-9)
 
-    # Check Signature
-    if check_signature(data) != data['sign_string']:
+    sign_str = check_signature(data)
+    if sign_str != data['sign_string']:
         return JsonResponse({
             "error": -1,
             "error_note": "SIGN CHECK FAILED!"
         })
+    action = data["action"]
 
-    # Logic to complete the payment here. Again, you might need to interact with your main system or database.
+    if action != 0:
+        return send_error(-3)
 
-    # Assuming everything went well, return a success response
+    order_id = data["merchant_trans_id"]
+    if len(order_id) > 18 or int(order_id) > 9223372036854775807:
+        return send_error(-5)
+    order: Order = Order.objects.filter(pk=order_id).first()
+    error = get_error_code(order, data)
+    if error:
+        return JsonResponse({
+            "error": error, "error_note": CLICK_ERRORS[error]
+        })
+    try:
+        click_pay: ClickPayment = ClickPayment.objects.create(
+            order=order,
+            transactionId=data["click_trans_id"],
+            sign_time=timezone.datetime.strptime(data["sign_time"], "%Y-%m-%d %H:%M:%S"),
+            action=action
+        )
+    except Exception:
+        return JsonResponse({
+            "error": -8, "error_note": CLICK_ERRORS[-8]
+        })
+
     return JsonResponse({
-        "error": 0,
-        "error_note": "Success",
+        "error": error,
+        "error_note": CLICK_ERRORS[error],
         "click_trans_id": data['click_trans_id'],
         "merchant_trans_id": data['merchant_trans_id'],
-        "merchant_confirm_id": 67890  # Replace with an actual ID from your system
+        "merchant_prepare_id": click_pay.id
+    })
+
+
+@api_view(['POST'])
+def click_complete(request):
+    serializer = ClickCompleteSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    sign_str = check_signature(data)
+    if sign_str != data['sign_string']:
+        return JsonResponse({
+            "error": -1,
+            "error_note": "SIGN CHECK FAILED!"
+        })
+    action = data["action"]
+    if action != 1:
+        return JsonResponse({
+            "error": -3,
+            "error_note": CLICK_ERRORS[-3]
+        })
+
+    merchant_prepare_id = data["merchant_prepare_id"]
+    click_pay: ClickPayment = ClickPayment.objects.filter(pk=merchant_prepare_id).first()
+    if click_pay is None:
+        return send_error(-6)
+
+    order = click_pay.order
+    error = get_error_code(order, data)
+    if error:
+        return JsonResponse({
+            "error": error, "error_note": CLICK_ERRORS[error]
+        })
+
+    order.status = Order.Status.PAID
+    order.payment_app = Order.PaymentAppType.CLICK
+    order.save()
+
+    click_pay.action = 1
+    click_pay.save()
+
+    return JsonResponse({
+        "error": error,
+        "error_note": CLICK_ERRORS[error],
+        "click_trans_id": data['click_trans_id'],
+        "merchant_trans_id": data['merchant_trans_id'],
+        "merchant_confirm_id": click_pay.id
     })
