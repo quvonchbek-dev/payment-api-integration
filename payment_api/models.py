@@ -59,13 +59,14 @@ class Order(models.Model):
         UZUM = "uzum"
         CLICK = "click"
         PAYME = "payme"
+        NONE = "none"
 
     owner = models.ForeignKey(User, related_name="orders", on_delete=models.CASCADE)
     status = models.IntegerField(choices=Status.choices, default=Status.WAITING)
     amount = models.BigIntegerField()
     payment_for = models.IntegerField(choices=OrderTypes.choices, default=OrderTypes.ALL)
     created_at = models.DateTimeField(editable=True, auto_now_add=True)
-    payment_app = models.CharField(max_length=10, choices=PaymentAppType.choices, default=PaymentAppType.UZUM)
+    payment_app = models.CharField(max_length=10, choices=PaymentAppType.choices, default=PaymentAppType.NONE)
 
     def __str__(self):
         return f"{self.id}"
@@ -95,7 +96,7 @@ class ClickPayment(models.Model):
 
     @property
     def status(self):
-        return ["WAITING", "PAID", "CANCELLED", "EXPIRED"][self.order.status]
+        return ["Waiting", "Paid", "Cancelled", "Expired"][self.order.status]
 
     def __str__(self):
         return f"{self.order.id} | {self.order.owner.name} | {self.order.amount}"

@@ -3,8 +3,8 @@ from .models import Order, Payment, ClickPayment
 
 
 class OrderAdmin(admin.ModelAdmin):
-    list_display = ["id", "owner", "status", "amount", "payment_for", "created_at"]
-    list_filter = ["status", "payment_for", "owner", "amount"]
+    list_display = ["id", "owner", "status", "amount", "payment_for", "payment_app", "created_at"]
+    list_filter = ["status", "payment_for", "owner", "amount", "payment_app"]
 
 
 class PaymentAdmin(admin.ModelAdmin):

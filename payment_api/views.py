@@ -141,6 +141,8 @@ def get_error_code(order: Order, data) -> int:
     if order is None:
         return -6
     if data["error"] < 0:
+        if order.status == Order.Status.PAID:
+            return -4
         order.status = Order.Status.CANCELLED
         order.save()
         return -9
@@ -223,6 +225,7 @@ def click_complete(request):
 
     order = click_pay.order
     error = get_error_code(order, data)
+    print(error)
     if error:
         return send_error(error)
 
