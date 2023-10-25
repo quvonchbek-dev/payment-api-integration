@@ -1,21 +1,21 @@
 import datetime
+import hashlib
 import os
 
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from django.utils import timezone
-from payment_api.models import Order, Payment, ClickPayment
-from payment_api.serializers import CheckPaymentSerializerUzum, PaymentSerializer, ClickCompleteSerializer, \
-    ClickPrepareSerializer
 from django.http import JsonResponse
-import hashlib
+from django.utils import timezone
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
-"""
-UUM
-"""
+from payment_api.models import Order, Payment, ClickPayment, PayMeTransaction
+from payment_api.serializers import CheckPaymentSerializerUzum, PaymentSerializer, ClickPrepareSerializer, \
+    ClickCompleteSerializer, PaymeSerializer
+from payment_api.utils import successful_payment
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def check_payment(request):
     serializer = CheckPaymentSerializerUzum(data=request.data)
     serializer.is_valid(raise_exception=True)
@@ -52,13 +52,14 @@ def check_payment(request):
                     "error": None,
                     "data": {
                         "fio": order.owner.name,
-                        "amount": order.amount
+                        "amount": order.amount * 100
                     }
                 }
     return Response(data)
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def process_payment(request):
     serializer = PaymentSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
@@ -80,7 +81,7 @@ def process_payment(request):
             data["error"] = "order_expired"
             order.status = Order.Status.EXPIRED
             order.save()
-        elif order.amount != amount:
+        elif order.amount * 100 != amount:
             data["error"] = "incorrect_amount"
         elif data["error"] == "":
             try:
@@ -97,6 +98,10 @@ def process_payment(request):
             '''
             Shu yerda to'lov foydalanuvchi profiliga saqlanib, unga to'lov haqidagi xabar yuborilishi kerak.
             '''
+            order.payment_app = Order.PaymentAppType.UZUM
+            order.save()
+            successful_payment(order)
+
     else:
         data["error"] = ["already_paid", "order_cancelled", "order_expired"][order.status - 1]
     return Response(data)
@@ -186,15 +191,13 @@ def click_prepare(request):
     error = get_error_code(order, data)
     if error:
         return send_error(error)
-    try:
-        click_pay: ClickPayment = ClickPayment.objects.create(
-            order=order,
-            transactionId=data["click_trans_id"],
-            sign_time=timezone.datetime.strptime(data["sign_time"], "%Y-%m-%d %H:%M:%S"),
-            action=action
-        )
-    except Exception:
-        return send_error(-8)
+
+    click_pay: ClickPayment = ClickPayment.objects.create(
+        order=order,
+        transactionId=data["click_trans_id"],
+        sign_time=timezone.datetime.strptime(data["sign_time"], "%Y-%m-%d %H:%M:%S"),
+        action=action
+    )
 
     return JsonResponse({
         "error": error,
@@ -235,7 +238,7 @@ def click_complete(request):
 
     click_pay.action = 1
     click_pay.save()
-
+    successful_payment(order)
     return JsonResponse({
         "error": error,
         "error_note": CLICK_ERRORS[error],
@@ -243,3 +246,169 @@ def click_complete(request):
         "merchant_trans_id": data['merchant_trans_id'],
         "merchant_confirm_id": click_pay.id
     })
+
+
+"""
+PAYME INTEGRATION - https://developer.help.paycom.uz/metody-merchant-api/
+"""
+
+PaymeCustomErrors = {
+    -31050: dict(ru="Заказ не найден", uz="Buyurtma topilmadi", en="Order not found"),
+    -31051: dict(ru="Уже оплачено", uz="Allaqachon to'langan", en="Already paid"),
+    -31052: dict(ru="Срок действия заказа истек", uz="Buyurtma muddati tugagan", en="Order expired"),
+    -31053: dict(ru="Заказ отменен", uz="Buyurtma bekor qilindi", en="Order cancelled")
+}
+
+
+def check_order(order: Order, amount: int):
+    if order is None:
+        return -31050
+    if order.Status == Order.Status.PAID:
+        return -31051
+    if order.Status == Order.Status.EXPIRED:
+        return -31052
+    if order.Status == Order.Status.CANCELLED:
+        return -31053
+    elif order.amount * 100 != amount:
+        return -31050
+    return 0
+
+
+def payme_check_perform(data: dict):
+    params = data["params"]
+    order_id = params["account"]["id"]
+    order = Order.objects.filter(pk=order_id).first()
+    print(order)
+    amount = params.get("amount")
+    res = {"id": data["id"]}
+    error_code = check_order(order, amount)
+    if error_code:
+        res["error"] = dict(code=error_code, message=PaymeCustomErrors[error_code])
+    else:
+        res["result"] = dict(allow=True)
+    return Response(res)
+
+
+def payme_create(data: dict):
+    params = data["params"]
+    order_id = params["account"]["id"]
+    order = Order.objects.filter(pk=order_id).first()
+    amount = params.get("amount")
+    res = {"id": data["id"]}
+    error_code = check_order(order, amount)
+    if error_code:
+        res["error"] = dict(code=error_code, message=PaymeCustomErrors[error_code])
+    else:
+        transaction = PayMeTransaction.objects.create(
+            transaction_id=params["id"],
+            time=params['time'],
+            order=order)
+        res["result"] = dict(create_time=transaction.create_time.timestamp(), transaction=str(transaction.id), state=1)
+    return Response(res)
+
+
+def payme_perform(data: dict):
+    tr_id = data["params"]["id"]
+    tr: PayMeTransaction = PayMeTransaction.objects.filter(transaction_id=tr_id).first()
+    res = {"id": data["id"]}
+    if tr is None:
+        res["error"] = dict(code=-31003)
+        return Response(res)
+
+    order = tr.order
+    if order.status in [Order.Status.WAITING, Order.Status.PAID]:
+        order.status = Order.Status.PAID
+        order.save()
+        res["result"] = dict(transaction=str(tr.id), perform_time=timezone.now().timestamp(), state=2)
+    else:
+        res["error"] = dict(code=-31008)
+    return Response(res)
+
+
+def payme_cancel(data: dict):
+    tr: PayMeTransaction = PayMeTransaction.objects.filter(transaction_id=data["params"]["id"]).first()
+    res = {"id": data["id"]}
+    if tr is None:
+        res["error"] = dict(code=-31003)
+        return Response(res)
+
+    order = tr.order
+    if order.status == Order.Status.WAITING:
+        order.status = Order.Status.CANCELLED
+        order.save()
+        res["result"] = dict(state=-1, transaction=tr.id, cancel_time=timezone.now().timestamp())
+    elif order.status == Order.Status.PAID:
+        res["error"] = dict(code=-31007)
+    else:
+        order.status = Order.Status.CANCELLED
+        res["result"] = dict(state=-2, transaction=tr.id, cancel_time=timezone.now().timestamp())
+    return Response(res)
+
+
+def payme_check_transaction(data: dict[dict]):
+    tr: PayMeTransaction = PayMeTransaction.objects.filter(transaction_id=data["params"]["id"]).first()
+    res = {"id": data["id"]}
+
+    if tr is None:
+        res["error"] = dict(code=-31003)
+    else:
+        order = tr.order
+        res["result"] = dict(
+            payme_create=tr.create_time.timestamp(),
+            perform_time=tr.last_action_time.timestamp() if order.status == Order.Status.PAID else 0,
+            cancel_time=tr.last_action_time.timestamp() if order.status == Order.Status.CANCELLED else 0,
+            transaction=str(tr.id),
+            state=order.status + 1 if order.status != Order.Status.CANCELLED else -1,
+        )
+    return Response(res)
+
+
+def payme_get_statement(data: dict[dict]):
+    params = data["params"]
+    start = datetime.datetime.fromtimestamp(params["from"])
+    end = datetime.datetime.fromtimestamp(params["to"])
+    qs = PayMeTransaction.objects.filter(
+        create_time__gte=start).filter(
+        create_time__lte=end).filter(
+        order__status__lt=2)
+    transactions = []
+    for tr in qs:
+        order = tr.order
+        transactions.append(dict(
+            id=tr.transaction_id,
+            time=tr.time,
+            account=dict(id=tr.order.id),
+            create_time=tr.last_action_time.timestamp(),
+            perform_time=tr.last_action_time.timestamp() if order.status == Order.Status.PAID else 0,
+            cancel_time=tr.last_action_time.timestamp() if order.status == Order.Status.CANCELLED else 0,
+            tramsaction=str(tr.id)
+        ))
+    return Response(dict(result=dict(transactions=[])))
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def payme_all(request):
+    print(request.data)
+    sz = PaymeSerializer(data=request.data)
+    sz.is_valid(raise_exception=True)
+
+    data = sz.validated_data
+    method = data["method"]
+
+    if method == "CreateTransaction":
+        return payme_create(data)
+    elif method == "PerformTransaction":
+        return payme_perform(data)
+    elif method == "CheckPerformTransaction":
+        return payme_check_perform(data)
+    elif method == "CancelTransaction":
+        return payme_cancel(data)
+    elif method == "CheckTransaction":
+        return payme_check_transaction(data)
+    elif method == "GetStatement":
+        return payme_get_statement(data)
+    elif method == "SetFiscalData":
+        pass
+
+    return Response(dict(error=dict(code=-32601), id=data["id"]))

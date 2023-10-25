@@ -26,3 +26,9 @@ class PaymentSerializer(serializers.Serializer):
     transactionId = serializers.CharField()
     orderId = serializers.CharField()
     amount = serializers.IntegerField()
+
+
+class PaymeSerializer(serializers.Serializer):
+    method = serializers.CharField(required=True)
+    params = serializers.JSONField()
+    id = serializers.IntegerField(allow_null=True, required=False)
