@@ -102,7 +102,7 @@ class Order(models.Model):
     payment_app = models.CharField(max_length=10, choices=PaymentAppType.choices, default=PaymentAppType.NONE)
 
     def __str__(self):
-        return f"{self.id}. {self.owner.name} - {self.amount} sum"
+        return f"{self.id}. {self.owner.name} - {self.amount} so'm"
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
@@ -114,8 +114,8 @@ class Payment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        verbose_name = "Uzum payment"
-        verbose_name_plural = "Uzum payments"
+        verbose_name = "Uzum"
+        verbose_name_plural = "Uzum"
 
     def __str__(self):
         return f"{self.order.owner.name} - {self.order.amount} sum"
@@ -138,6 +138,10 @@ class ClickPayment(models.Model):
     def __str__(self):
         return f"{self.order.id} | {self.order.owner.name} | {self.order.amount}"
 
+    class Meta:
+        verbose_name = "Click"
+        verbose_name_plural = "Click"
+
 
 class PayMeTransaction(models.Model):
     transaction_id = models.CharField(max_length=100)
@@ -145,3 +149,7 @@ class PayMeTransaction(models.Model):
     time = models.DateTimeField()
     create_time = models.DateTimeField(auto_now_add=True)
     last_action_time = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "PayMe"
+        verbose_name_plural = "PayMe"

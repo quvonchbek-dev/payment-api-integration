@@ -260,17 +260,15 @@ PaymeCustomErrors = {
 }
 
 
-def check_order(order: Order, amount: int):
+def check_order(order: Order):
     if order is None:
         return -31050
-    if order.Status == Order.Status.PAID:
+    if order.status == Order.Status.PAID:
         return -31051
-    if order.Status == Order.Status.EXPIRED:
+    if order.status == Order.Status.EXPIRED:
         return -31052
-    if order.Status == Order.Status.CANCELLED:
+    if order.status == Order.Status.CANCELLED:
         return -31053
-    elif order.amount * 100 != amount:
-        return -31050
     return 0
 
 
@@ -281,30 +279,40 @@ def payme_check_perform(data: dict):
     print(order)
     amount = params.get("amount")
     res = {"id": data["id"]}
-    error_code = check_order(order, amount)
+    error_code = check_order(order)
     if error_code:
         res["error"] = dict(code=error_code, message=PaymeCustomErrors[error_code])
+    elif order.amount * 100 != amount:
+        res["error"] = dict(code=-31001)
     else:
         res["result"] = dict(allow=True)
-    return Response(res)
+    return res
 
 
 def payme_create(data: dict):
     params = data["params"]
-    order_id = params["account"]["id"]
-    order = Order.objects.filter(pk=order_id).first()
-    amount = params.get("amount")
     res = {"id": data["id"]}
-    error_code = check_order(order, amount)
-    if error_code:
-        res["error"] = dict(code=error_code, message=PaymeCustomErrors[error_code])
-    else:
-        transaction = PayMeTransaction.objects.create(
+    tr = PayMeTransaction.objects.filter(transaction_id=params["id"]).first()
+    if tr is None:
+        check = payme_check_perform(data)
+        if check.get("result") is None or not check["result"]["allow"]:
+            return check
+        order = Order.objects.filter(pk=params["account"]["id"]).first()
+        tr = PayMeTransaction.objects.create(
             transaction_id=params["id"],
-            time=params['time'],
+            time=datetime.datetime.fromtimestamp(params['time']),
             order=order)
-        res["result"] = dict(create_time=transaction.create_time.timestamp(), transaction=str(transaction.id), state=1)
-    return Response(res)
+    else:
+        order = tr.order
+        delta = datetime.datetime.now() - datetime.datetime.fromtimestamp(params["time"])
+        if order.status != Order.Status.WAITING or delta.seconds > 43_200:
+            order.status = Order.Status.CANCELLED + int(delta.seconds > 43_200)
+            order.save()
+            res["error"] = dict(code=-31008)
+            return res
+
+    res["result"] = dict(create_time=int(tr.create_time.timestamp()), transaction=str(tr.id), state=1)
+    return res
 
 
 def payme_perform(data: dict):
@@ -313,7 +321,7 @@ def payme_perform(data: dict):
     res = {"id": data["id"]}
     if tr is None:
         res["error"] = dict(code=-31003)
-        return Response(res)
+        return res
 
     order = tr.order
     if order.status in [Order.Status.WAITING, Order.Status.PAID]:
@@ -322,7 +330,7 @@ def payme_perform(data: dict):
         res["result"] = dict(transaction=str(tr.id), perform_time=timezone.now().timestamp(), state=2)
     else:
         res["error"] = dict(code=-31008)
-    return Response(res)
+    return res
 
 
 def payme_cancel(data: dict):
@@ -330,7 +338,7 @@ def payme_cancel(data: dict):
     res = {"id": data["id"]}
     if tr is None:
         res["error"] = dict(code=-31003)
-        return Response(res)
+        return res
 
     order = tr.order
     if order.status == Order.Status.WAITING:
@@ -342,7 +350,7 @@ def payme_cancel(data: dict):
     else:
         order.status = Order.Status.CANCELLED
         res["result"] = dict(state=-2, transaction=tr.id, cancel_time=timezone.now().timestamp())
-    return Response(res)
+    return res
 
 
 def payme_check_transaction(data: dict[dict]):
@@ -360,7 +368,7 @@ def payme_check_transaction(data: dict[dict]):
             transaction=str(tr.id),
             state=order.status + 1 if order.status != Order.Status.CANCELLED else -1,
         )
-    return Response(res)
+    return res
 
 
 def payme_get_statement(data: dict[dict]):
@@ -383,7 +391,7 @@ def payme_get_statement(data: dict[dict]):
             cancel_time=tr.last_action_time.timestamp() if order.status == Order.Status.CANCELLED else 0,
             tramsaction=str(tr.id)
         ))
-    return Response(dict(result=dict(transactions=[])))
+    return dict(result=dict(transactions=[]))
 
 
 @api_view(['POST'])
@@ -397,17 +405,17 @@ def payme_all(request):
     method = data["method"]
 
     if method == "CreateTransaction":
-        return payme_create(data)
+        return Response(payme_create(data))
     elif method == "PerformTransaction":
-        return payme_perform(data)
+        return Response(payme_perform(data))
     elif method == "CheckPerformTransaction":
-        return payme_check_perform(data)
+        return Response(payme_check_perform(data))
     elif method == "CancelTransaction":
-        return payme_cancel(data)
+        return Response(payme_cancel(data))
     elif method == "CheckTransaction":
-        return payme_check_transaction(data)
+        return Response(payme_check_transaction(data))
     elif method == "GetStatement":
-        return payme_get_statement(data)
+        return Response(payme_get_statement(data))
     elif method == "SetFiscalData":
         pass
 
