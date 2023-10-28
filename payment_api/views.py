@@ -304,10 +304,12 @@ def payme_create(data: dict):
             order=order)
     else:
         order = tr.order
-        delta = datetime.datetime.now() - datetime.datetime.fromtimestamp(params["time"])
-        if order.status != Order.Status.WAITING or delta.seconds > 43_200:
-            order.status = Order.Status.CANCELLED + int(delta.seconds > 43_200)
+        delta = tr.create_time + datetime.timedelta(seconds=43_200)
+        expired = delta < datetime.datetime.now()
+        if expired and order.status == Order.Status.WAITING:
+            order.status = Order.Status.EXPIRED
             order.save()
+        if order.status != Order.Status.WAITING:
             res["error"] = dict(code=-31008)
             return res
 

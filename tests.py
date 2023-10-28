@@ -6,7 +6,7 @@ import unittest
 import requests
 
 from core import wsgi
-from payment_api.models import Order, User
+from payment_api.models import Order, User, PayMeTransaction
 
 a = wsgi.application
 
@@ -59,12 +59,24 @@ class TestPayme(unittest.TestCase):
         now = datetime.datetime.now()
         data = dict(
             method="CreateTransaction",
-            params=dict(id=f"test_{time.time()}", time=now.timestamp(),
+            params=dict(id=f"test_{int(time.time())}", time=now.timestamp(),
                         amount=self.amount * 100, account=dict(id=self.order.id)), id=123)
         res = self.session.post(self.url, json=data).json()
         self.assertIn("result", res, "Result")
 
-        data["params"]["time"] = now + datetime.timedelta(days=2)
+        tr: PayMeTransaction = PayMeTransaction.objects.filter(pk=res["result"]["transaction"]).first()
+        tr.create_time -= datetime.timedelta(days=0.5)
+        tr.save()
+        data["params"]["time"] = (now - datetime.timedelta(days=0.5)).timestamp()
+        res = self.session.post(self.url, json=data).json()
+        self.assertEqual(res["error"]["code"], -31008, "Should be expired")
+
+        tr.create_time += datetime.timedelta(days=0.5)
+        tr.save()
+        data["params"]["time"] = now.timestamp()
+        res = self.session.post(self.url, json=data).json()
+        self.assertEqual(res["error"]["code"], -31008, "Should be Cancelled/Expired")
+
 
 
 
