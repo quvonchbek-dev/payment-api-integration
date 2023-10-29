@@ -145,7 +145,7 @@ class ClickPayment(models.Model):
 
 class PayMeTransaction(models.Model):
     transaction_id = models.CharField(max_length=100)
-    order = models.ForeignKey(Order, models.CASCADE, 'payme_payments')
+    order = models.ForeignKey(Order, models.CASCADE, related_name='payme_transactions')
     time = models.DateTimeField()
     create_time = models.DateTimeField(auto_now_add=True)
     perform_time = models.DateTimeField(null=True, blank=True)

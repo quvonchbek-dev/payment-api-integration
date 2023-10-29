@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Order, Payment, ClickPayment, PayMeTransaction
+from .models import Order, Payment, ClickPayment, PayMeTransaction, Tarif, User
 
 
 class OrderAdmin(admin.ModelAdmin):
@@ -35,3 +35,6 @@ admin.site.register(Order, OrderAdmin)
 admin.site.register(Payment, PaymentAdmin)
 admin.site.register(ClickPayment, ClickPaymentAdmin)
 admin.site.register(PayMeTransaction, PayMeTransactionAdmin)
+admin.site.register(Tarif)
+admin.site.register(User)
+

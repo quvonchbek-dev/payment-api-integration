@@ -277,7 +277,7 @@ def payme_check_perform(data: dict):
     order_id = params["account"]["id"]
     order = Order.objects.filter(pk=order_id).first()
     amount = params.get("amount")
-    res = {"id": data["id"]}
+    res = {"id": data.get("id")}
     error_code = check_order(order)
     if error_code:
         res["error"] = dict(code=error_code, message=PaymeCustomErrors[error_code])
@@ -290,7 +290,7 @@ def payme_check_perform(data: dict):
 
 def payme_create(data: dict):
     params = data["params"]
-    res = {"id": data["id"]}
+    res = {"id": data.get("id")}
     tr = PayMeTransaction.objects.filter(transaction_id=params["id"]).first()
     if tr is None:
         check = payme_check_perform(data)
@@ -299,12 +299,14 @@ def payme_create(data: dict):
         order = Order.objects.filter(pk=params["account"]["id"]).first()
         tr = PayMeTransaction.objects.create(
             transaction_id=params["id"],
-            time=datetime.datetime.fromtimestamp(params['time']),
+            time=timezone.datetime.fromtimestamp(params['time']),
+            create_time=timezone.now(),
             order=order)
+        successful_payment(order)
     else:
         order = tr.order
         delta = tr.create_time + datetime.timedelta(seconds=43_200)
-        expired = delta < datetime.datetime.now()
+        expired = delta < timezone.now()
         if expired and order.status == Order.Status.WAITING:
             order.status = Order.Status.EXPIRED
             order.save()
@@ -319,14 +321,14 @@ def payme_create(data: dict):
 def payme_perform(data: dict):
     tr_id = data["params"]["id"]
     tr: PayMeTransaction = PayMeTransaction.objects.filter(transaction_id=tr_id).first()
-    res = {"id": data["id"]}
+    res = {"id": data.get("id")}
     if tr is None:
         res["error"] = dict(code=-31003)
         return res
 
     order = tr.order
     if order.status == Order.Status.WAITING:
-        if tr.create_time + datetime.timedelta(hours=12) > timezone.now():
+        if tr.create_time + datetime.timedelta(hours=12) < timezone.now():
             order.status = Order.Status.EXPIRED
             order.save()
             res["error"] = dict(code=-31008)
@@ -347,7 +349,7 @@ def payme_perform(data: dict):
 
 def payme_cancel(data: dict):
     tr: PayMeTransaction = PayMeTransaction.objects.filter(transaction_id=data["params"]["id"]).first()
-    res = {"id": data["id"]}
+    res = {"id": data.get("id")}
     if tr is None:
         res["error"] = dict(code=-31003)
         return res
@@ -374,7 +376,7 @@ def payme_cancel(data: dict):
 
 def payme_check_transaction(data: dict[dict]):
     tr: PayMeTransaction = PayMeTransaction.objects.filter(transaction_id=data["params"]["id"]).first()
-    res = {"id": data["id"]}
+    res = {"id": data.get("id")}
 
     if tr is None:
         res["error"] = dict(code=-31003)
@@ -403,14 +405,19 @@ def payme_get_statement(data: dict[dict]):
     transactions = []
     for tr in qs:
         order = tr.order
+        state = order.status + 1
+        if order.status > Order.Status.PAID:
+            state = -1 - (order.status == Order.Status.EXPIRED)
         transactions.append(dict(
             id=tr.transaction_id,
             time=tr.time,
+            amount=order.amount * 100,
             account=dict(id=tr.order.id),
             create_time=int(tr.create_time.timestamp()),
             perform_time=int(tr.perform_time.timestamp()) if order.status == Order.Status.PAID else 0,
             cancel_time=int(tr.cancel_time.timestamp()) if order.status == Order.Status.CANCELLED else 0,
-            tramsaction=str(tr.id)
+            transaction=str(tr.id),
+            state=state
         ))
     return dict(result=dict(transactions=transactions))
 

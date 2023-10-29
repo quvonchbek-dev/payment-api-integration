@@ -4,9 +4,10 @@ import time
 import unittest
 
 import requests
+from django.db.models import QuerySet
 
 from core import wsgi
-from payment_api.models import Order, User, PayMeTransaction
+from payment_api.models import Order, User, PayMeTransaction, Tarif
 
 a = wsgi.application
 
@@ -18,13 +19,14 @@ class TestPayme(unittest.TestCase):
     order: Order = Order.objects.create(
         owner=User.users.first(),
         amount=amount,
+        tariff=Tarif.objects.first(),
         payment_for=random.randint(0, 2),
         payment_app="payme"
     )
     session = requests.session()
     session.auth = auth
 
-    def test_check_perform_transaction(self):
+    def test_1_check_perform_transaction(self):
         order = self.order
         data = dict(method="CheckPerformTransaction", params=dict(amount=self.amount * 100,
                                                                   account=dict(id=order.id)), id=123)
@@ -53,9 +55,8 @@ class TestPayme(unittest.TestCase):
         res = self.session.post(self.url, json=data).json()
         data["params"]["amount"] -= 1
         self.assertEqual(res["error"]["code"], -31001, "Amount should different")
-        self.order.refresh_from_db()
 
-    def test_create_transaction(self):
+    def test_2_create_transaction(self):
         now = datetime.datetime.now()
         data = dict(
             method="CreateTransaction",
@@ -76,6 +77,71 @@ class TestPayme(unittest.TestCase):
         data["params"]["time"] = now.timestamp()
         res = self.session.post(self.url, json=data).json()
         self.assertEqual(res["error"]["code"], -31008, "Should be Cancelled/Expired")
+
+    def test_3_perform_transaction(self):
+        tr: PayMeTransaction = self.order.payme_transactions.first()
+        data = dict(method="PerformTransaction", params=dict(id=tr.transaction_id))
+        res = self.session.post(self.url, json=data).json()
+        self.assertIn("error", res, "Transaction should be cancelled")
+
+        self.order.status = Order.Status.WAITING
+        self.order.save()
+        res = self.session.post(self.url, json=data).json()
+        self.assertIn("result", res, "Status should be PAID")
+
+    def test_4_cancel_transaction(self):
+        tr: PayMeTransaction = self.order.payme_transactions.first()
+        data = dict(method="CancelTransaction", params=dict(id=tr.transaction_id))
+        res = self.session.post(self.url, json=data).json()
+        self.assertEqual(res["error"]["code"], -31007)
+
+        self.order.status = Order.Status.EXPIRED
+        self.order.save()
+        res = self.session.post(self.url, json=data).json()
+        self.assertEqual(res["result"]["state"], -2)
+
+        self.order.status = Order.Status.WAITING
+        self.order.save()
+        res = self.session.post(self.url, json=data).json()
+        self.assertEqual(res["result"]["state"], -1)
+
+    def test_5_check_transaction(self):
+        tr: PayMeTransaction = self.order.payme_transactions.first()
+        data = dict(method="CheckTransaction", params=dict(id=tr.transaction_id))
+        res = self.session.post(self.url, json=data).json()
+        self.assertEqual(res["result"]["state"], -1)
+
+        self.order.status = Order.Status.EXPIRED
+        self.order.save()
+        res = self.session.post(self.url, json=data).json()
+        self.assertEqual(res["result"]["state"], -2)
+
+        self.order.status = Order.Status.WAITING
+        self.order.save()
+        res = self.session.post(self.url, json=data).json()
+        self.assertEqual(res["result"]["state"], 1)
+
+        self.order.status = Order.Status.PAID
+        self.order.save()
+        res = self.session.post(self.url, json=data).json()
+        self.assertEqual(res["result"]["state"], 2)
+
+    def test_6_get_statement(self):
+        end = datetime.datetime.now()
+        start = end - datetime.timedelta(hours=1)
+        data = {
+            "method": "GetStatement",
+            "params": {
+                "from": int(start.timestamp()),
+                "to": int(end.timestamp())
+            }
+        }
+        res = self.session.post(self.url, json=data).json()
+        qs: QuerySet[PayMeTransaction] = PayMeTransaction.objects.filter(
+            create_time__gte=start).filter(
+            create_time__lte=end).order_by("create_time")
+
+        self.assertEqual(qs.count(), len(res["result"]["transactions"]), )
 
 
 if __name__ == '__main__':
