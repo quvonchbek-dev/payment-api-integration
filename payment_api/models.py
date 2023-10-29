@@ -148,7 +148,8 @@ class PayMeTransaction(models.Model):
     order = models.ForeignKey(Order, models.CASCADE, 'payme_payments')
     time = models.DateTimeField()
     create_time = models.DateTimeField(auto_now_add=True)
-    last_action_time = models.DateTimeField(null=True, blank=True)
+    perform_time = models.DateTimeField(null=True, blank=True)
+    cancel_time = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "PayMe"

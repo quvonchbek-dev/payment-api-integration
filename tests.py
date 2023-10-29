@@ -78,7 +78,5 @@ class TestPayme(unittest.TestCase):
         self.assertEqual(res["error"]["code"], -31008, "Should be Cancelled/Expired")
 
 
-
-
 if __name__ == '__main__':
     unittest.main()

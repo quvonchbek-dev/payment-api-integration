@@ -2,6 +2,7 @@ import datetime
 import hashlib
 import os
 
+from django.db.models import QuerySet
 from django.http import JsonResponse
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -228,7 +229,6 @@ def click_complete(request):
 
     order = click_pay.order
     error = get_error_code(order, data)
-    print(error)
     if error:
         return send_error(error)
 
@@ -276,7 +276,6 @@ def payme_check_perform(data: dict):
     params = data["params"]
     order_id = params["account"]["id"]
     order = Order.objects.filter(pk=order_id).first()
-    print(order)
     amount = params.get("amount")
     res = {"id": data["id"]}
     error_code = check_order(order)
@@ -326,12 +325,23 @@ def payme_perform(data: dict):
         return res
 
     order = tr.order
-    if order.status in [Order.Status.WAITING, Order.Status.PAID]:
+    if order.status == Order.Status.WAITING:
+        if tr.create_time + datetime.timedelta(hours=12) > timezone.now():
+            order.status = Order.Status.EXPIRED
+            order.save()
+            res["error"] = dict(code=-31008)
+            return res
+
         order.status = Order.Status.PAID
         order.save()
-        res["result"] = dict(transaction=str(tr.id), perform_time=timezone.now().timestamp(), state=2)
+        tr.perform_time = timezone.now()
+        tr.save()
+        res["result"] = dict(transaction=str(tr.id), perform_time=int(tr.perform_time.timestamp()), state=2)
     else:
-        res["error"] = dict(code=-31008)
+        if order.status == Order.Status.PAID:
+            res["result"] = dict(transaction=str(tr.id), perform_time=int(tr.perform_time.timestamp()), state=2)
+        else:
+            res["error"] = dict(code=-31008)
     return res
 
 
@@ -346,12 +356,19 @@ def payme_cancel(data: dict):
     if order.status == Order.Status.WAITING:
         order.status = Order.Status.CANCELLED
         order.save()
-        res["result"] = dict(state=-1, transaction=tr.id, cancel_time=timezone.now().timestamp())
+
+        tr.cancel_time = timezone.now()
+        tr.save()
+
+        res["result"] = dict(state=-1, transaction=str(tr.id), cancel_time=int(tr.cancel_time.timestamp()))
     elif order.status == Order.Status.PAID:
         res["error"] = dict(code=-31007)
     else:
         order.status = Order.Status.CANCELLED
-        res["result"] = dict(state=-2, transaction=tr.id, cancel_time=timezone.now().timestamp())
+        order.save()
+        tr.cancel_time = timezone.now()
+        tr.save()
+        res["result"] = dict(state=-2, transaction=str(tr.id), cancel_time=int(tr.cancel_time.timestamp()))
     return res
 
 
@@ -363,12 +380,15 @@ def payme_check_transaction(data: dict[dict]):
         res["error"] = dict(code=-31003)
     else:
         order = tr.order
+        state = order.status + 1
+        if order.status > Order.Status.PAID:
+            state = -1 - (order.status == Order.Status.EXPIRED)
         res["result"] = dict(
-            payme_create=tr.create_time.timestamp(),
-            perform_time=tr.last_action_time.timestamp() if order.status == Order.Status.PAID else 0,
-            cancel_time=tr.last_action_time.timestamp() if order.status == Order.Status.CANCELLED else 0,
+            create_time=int(tr.create_time.timestamp()),
+            perform_time=int(tr.perform_time.timestamp()) if order.status == Order.Status.PAID else 0,
+            cancel_time=int(tr.perform_time.timestamp()) if order.status == Order.Status.CANCELLED else 0,
             transaction=str(tr.id),
-            state=order.status + 1 if order.status != Order.Status.CANCELLED else -1,
+            state=state
         )
     return res
 
@@ -377,10 +397,9 @@ def payme_get_statement(data: dict[dict]):
     params = data["params"]
     start = datetime.datetime.fromtimestamp(params["from"])
     end = datetime.datetime.fromtimestamp(params["to"])
-    qs = PayMeTransaction.objects.filter(
+    qs: QuerySet[PayMeTransaction] = PayMeTransaction.objects.filter(
         create_time__gte=start).filter(
-        create_time__lte=end).filter(
-        order__status__lt=2)
+        create_time__lte=end).order_by("create_time")
     transactions = []
     for tr in qs:
         order = tr.order
@@ -388,18 +407,17 @@ def payme_get_statement(data: dict[dict]):
             id=tr.transaction_id,
             time=tr.time,
             account=dict(id=tr.order.id),
-            create_time=tr.last_action_time.timestamp(),
-            perform_time=tr.last_action_time.timestamp() if order.status == Order.Status.PAID else 0,
-            cancel_time=tr.last_action_time.timestamp() if order.status == Order.Status.CANCELLED else 0,
+            create_time=int(tr.create_time.timestamp()),
+            perform_time=int(tr.perform_time.timestamp()) if order.status == Order.Status.PAID else 0,
+            cancel_time=int(tr.cancel_time.timestamp()) if order.status == Order.Status.CANCELLED else 0,
             tramsaction=str(tr.id)
         ))
-    return dict(result=dict(transactions=[]))
+    return dict(result=dict(transactions=transactions))
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def payme_all(request):
-    print(request.data)
     sz = PaymeSerializer(data=request.data)
     sz.is_valid(raise_exception=True)
 
