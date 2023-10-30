@@ -1,12 +1,12 @@
-import datetime
 import random
 import time
 import unittest
 
 import requests
 from django.db.models import QuerySet
+from django.utils import timezone
 
-from core import wsgi
+from gruzadmin import wsgi
 from payment_api.models import Order, User, PayMeTransaction, Tarif
 
 a = wsgi.application
@@ -57,7 +57,7 @@ class TestPayme(unittest.TestCase):
         self.assertEqual(res["error"]["code"], -31001, "Amount should different")
 
     def test_2_create_transaction(self):
-        now = datetime.datetime.now()
+        now = timezone.now()
         data = dict(
             method="CreateTransaction",
             params=dict(id=f"test_{int(time.time())}", time=now.timestamp(),
@@ -66,13 +66,13 @@ class TestPayme(unittest.TestCase):
         self.assertIn("result", res, "Result")
 
         tr: PayMeTransaction = PayMeTransaction.objects.filter(pk=res["result"]["transaction"]).first()
-        tr.create_time -= datetime.timedelta(days=0.5)
+        tr.create_time -= timezone.timedelta(days=0.5)
         tr.save()
-        data["params"]["time"] = (now - datetime.timedelta(days=0.5)).timestamp()
+        data["params"]["time"] = (now - timezone.timedelta(days=0.5)).timestamp()
         res = self.session.post(self.url, json=data).json()
         self.assertEqual(res["error"]["code"], -31008, "Should be expired")
 
-        tr.create_time += datetime.timedelta(days=0.5)
+        tr.create_time += timezone.timedelta(days=0.5)
         tr.save()
         data["params"]["time"] = now.timestamp()
         res = self.session.post(self.url, json=data).json()
@@ -127,8 +127,8 @@ class TestPayme(unittest.TestCase):
         self.assertEqual(res["result"]["state"], 2)
 
     def test_6_get_statement(self):
-        end = datetime.datetime.now()
-        start = end - datetime.timedelta(hours=1)
+        end = timezone.now()
+        start = end - timezone.timedelta(hours=1)
         data = {
             "method": "GetStatement",
             "params": {

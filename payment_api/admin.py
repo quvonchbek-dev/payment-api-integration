@@ -28,7 +28,10 @@ class ClickPaymentAdmin(admin.ModelAdmin):
 
 
 class PayMeTransactionAdmin(admin.ModelAdmin):
-    list_display = ["id", "order", "time", "create_time"]
+    list_display = ["id", "order", "status", "perform_time"]
+
+    def status(self, obj: ClickPayment):
+        return ["WAITING", "PAID", "CANCELLED", "EXPIRED"][obj.order.status]
 
 
 admin.site.register(Order, OrderAdmin)
