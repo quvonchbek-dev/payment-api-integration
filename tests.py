@@ -5,8 +5,8 @@ import unittest
 import requests
 from django.db.models import QuerySet
 from django.utils import timezone
+from core import wsgi
 
-from gruzadmin import wsgi
 from payment_api.models import Order, User, PayMeTransaction, Tarif
 
 a = wsgi.application
