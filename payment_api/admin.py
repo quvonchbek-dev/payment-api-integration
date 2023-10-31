@@ -30,8 +30,8 @@ class ClickPaymentAdmin(admin.ModelAdmin):
 class PayMeTransactionAdmin(admin.ModelAdmin):
     list_display = ["id", "order", "status", "perform_time"]
 
-    def status(self, obj: ClickPayment):
-        return ["WAITING", "PAID", "CANCELLED", "EXPIRED"][obj.order.status]
+    def status(self, obj: PayMeTransaction):
+        return ["NULL", "WAITING", "PAID", "CANCELLED 2", "CANCELLED 1"][obj.state]
 
 
 admin.site.register(Order, OrderAdmin)
