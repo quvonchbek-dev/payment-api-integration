@@ -414,7 +414,7 @@ def payme_get_statement(data):
     start = params["from"]
     end = params["to"]
     qs: QuerySet[PayMeTransaction] = PayMeTransaction.objects.filter(
-        create_time__gte=start).filter(create_time__lte=end).order_by("create_time")
+        create_time__gte=start).filter(create_time__lte=end)
     transactions = []
     for tr in qs:
         transactions.append(dict(
