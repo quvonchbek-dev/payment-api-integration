@@ -302,6 +302,10 @@ def payme_create(data: dict):
         if check.get("result") is None or not check["result"]["allow"]:
             return check
         order = Order.objects.filter(pk=params["account"]["id"]).first()
+        if order.payme_transactions.first() is not None:
+            res["error"] = PaymeErrors.TRANS_ALREADY_EXISTS
+            return res
+
         tr = PayMeTransaction.objects.create(
             transaction_id=params["id"],
             time=timezone.datetime.fromtimestamp(params['time'] / 1000),
@@ -315,7 +319,9 @@ def payme_create(data: dict):
         if expired and order.status == Order.Status.WAITING:
             order.status = Order.Status.EXPIRED
             order.save()
-        if order.status == Order.Status.WAITING:
+            res["result"] = dict(create_time=int(tr.create_time.timestamp() * 1000), transaction=str(tr.id), state=-1)
+            return res
+        if order.status != Order.Status.WAITING:
             res["error"] = PaymeErrors.CANT_PERFORM_TRANS
             return res
 

@@ -11,6 +11,7 @@ class Error:
 
 
 class PaymeErrors:
+    TRANS_ALREADY_EXISTS = Error(-31054, "Tranzaksiya allaqachon yaratilgan", "Транзакция уже существует", "Transaction already exists")
     ORDER_EXPIRED = Error(-31052, ru="Срок действия заказа истек", uz="Buyurtma muddati tugagan", en="Order expired").json,
     ORDER_CANCELLED = Error(-31053, ru="Заказ отменен", uz="Buyurtma bekor qilindi", en="Order cancelled").json
     ALREADY_PAID = Error(-31051, ru="Уже оплачено", uz="Allaqachon to'langan", en="Already paid").json
