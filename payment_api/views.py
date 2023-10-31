@@ -363,28 +363,27 @@ def payme_perform(data: dict):
     return res
 
 
+def cancel_trans(tr: PayMeTransaction, state, reason):
+    order = tr.order
+    order.status = Order.Status.CANCELLED
+    order.save()
+    tr.cancel_time = int(timezone.now().timestamp() * 1000)
+    tr.state = state
+    tr.reason = reason
+    tr.save()
+
+
 def payme_cancel(data: dict):
     tr: PayMeTransaction = PayMeTransaction.objects.filter(transaction_id=data["params"]["id"]).first()
     res = {"id": data.get("id")}
     if tr is None:
         res["error"] = PaymeErrors.TRANS_NOT_FOUND
         return res
-
-    order = tr.order
     if tr.state == 1:
-        order.status = Order.Status.CANCELLED
-        order.save()
-        tr.cancel_time = int(timezone.now().timestamp() * 1000)
-        tr.state = -1
-        tr.reason = data["params"].get("reason")
-        tr.save()
+        cancel_trans(tr, -1, data["params"].get("reason"))
     elif tr.state == 2:
         res["error"] = PaymeErrors.CANT_CANCEL_TRANSACTION
         return res
-    else:
-        tr.state = -2
-        tr.reason = data["params"].get("reason")
-        tr.save()
     res["result"] = dict(state=tr.state, transaction=str(tr.id), cancel_time=tr.cancel_time)
     return res
 
