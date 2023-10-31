@@ -343,10 +343,10 @@ def payme_perform(data: dict):
         order.save()
         tr.perform_time = timezone.now()
         tr.save()
-        res["result"] = dict(transaction=str(tr.id), perform_time=int(tr.perform_time.timestamp()), state=2)
+        res["result"] = dict(transaction=str(tr.id), perform_time=int(tr.perform_time.timestamp() * 1000), state=2)
     else:
         if order.status == Order.Status.PAID:
-            res["result"] = dict(transaction=str(tr.id), perform_time=int(tr.perform_time.timestamp()), state=2)
+            res["result"] = dict(transaction=str(tr.id), perform_time=int(tr.perform_time.timestamp() * 1000), state=2)
         else:
             res["error"] = PaymeErrors.CANT_PERFORM_TRANS
     return res
@@ -367,7 +367,7 @@ def payme_cancel(data: dict):
         tr.cancel_time = timezone.now()
         tr.save()
 
-        res["result"] = dict(state=-1, transaction=str(tr.id), cancel_time=int(tr.cancel_time.timestamp()))
+        res["result"] = dict(state=-1, transaction=str(tr.id), cancel_time=int(tr.cancel_time.timestamp() * 1000))
     elif order.status == Order.Status.PAID:
         res["error"] = PaymeErrors.CANT_CANCEL_TRANSACTION
     else:
@@ -375,7 +375,7 @@ def payme_cancel(data: dict):
         order.save()
         tr.cancel_time = timezone.now()
         tr.save()
-        res["result"] = dict(state=-2, transaction=str(tr.id), cancel_time=int(tr.cancel_time.timestamp()))
+        res["result"] = dict(state=-2, transaction=str(tr.id), cancel_time=int(tr.cancel_time.timestamp() * 1000))
     return res
 
 
@@ -391,9 +391,9 @@ def payme_check_transaction(data):
         if order.status > Order.Status.PAID:
             state = -1 - (order.status == Order.Status.EXPIRED)
         res["result"] = dict(
-            create_time=tr.create_time.timestamp() * 1000,
-            perform_time=tr.perform_time.timestamp() * 1000 if order.status == Order.Status.PAID else 0,
-            cancel_time=tr.perform_time.timestamp() * 1000 if order.status == Order.Status.CANCELLED else 0,
+            create_time=int(tr.create_time.timestamp() * 1000),
+            perform_time=int(tr.perform_time.timestamp() * 1000) if order.status == Order.Status.PAID else 0,
+            cancel_time=int(tr.perform_time.timestamp() * 1000) if order.status == Order.Status.CANCELLED else 0,
             transaction=str(tr.id),
             state=state
         )
@@ -415,12 +415,12 @@ def payme_get_statement(data):
             state = -1 - (order.status == Order.Status.EXPIRED)
         transactions.append(dict(
             id=tr.transaction_id,
-            time=tr.time,
+            time=int(tr.time.timestamp() * 1000),
             amount=order.amount * 100,
             account=dict(id=tr.order.id),
-            create_time=int(tr.create_time.timestamp()),
-            perform_time=int(tr.perform_time.timestamp()) if order.status == Order.Status.PAID else 0,
-            cancel_time=int(tr.cancel_time.timestamp()) if order.status == Order.Status.CANCELLED else 0,
+            create_time=int(tr.create_time.timestamp() * 1000),
+            perform_time=int(tr.perform_time.timestamp() * 1000) if order.status == Order.Status.PAID else 0,
+            cancel_time=int(tr.cancel_time.timestamp() * 1000) if order.status == Order.Status.CANCELLED else 0,
             transaction=str(tr.id),
             state=state
         ))
