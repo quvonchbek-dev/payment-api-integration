@@ -381,9 +381,9 @@ def payme_cancel(data: dict):
         return res
     if tr.state == 1:
         cancel_trans(tr, -1, data["params"].get("reason"))
-    elif tr.state == 2:
-        res["error"] = PaymeErrors.CANT_CANCEL_TRANSACTION
-        return res
+    elif tr.state < 0:
+        tr.reason = data["params"].get("reason")
+        tr.save()
     res["result"] = dict(state=tr.state, transaction=str(tr.id), cancel_time=tr.cancel_time)
     return res
 
