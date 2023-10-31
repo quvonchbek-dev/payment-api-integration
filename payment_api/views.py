@@ -400,8 +400,8 @@ def payme_check_transaction(data):
     else:
         res["result"] = dict(
             create_time=tr.create_time,
-            perform_time=tr.perform_time,
-            cancel_time=tr.cancel_time,
+            perform_time=tr.perform_time * (abs(tr.state) == 2),
+            cancel_time=tr.cancel_time * (tr.state < 0),
             transaction=str(tr.id),
             state=tr.state,
             reason=tr.reason
@@ -423,8 +423,8 @@ def payme_get_statement(data):
             amount=tr.order.amount * 100,
             account=dict(id=tr.order.id),
             create_time=tr.create_time,
-            perform_time=tr.perform_time,
-            cancel_time=tr.cancel_time,
+            perform_time=tr.perform_time * (abs(tr.state) == 2),
+            cancel_time=tr.cancel_time * (tr.state < 0),
             transaction=str(tr.id),
             state=tr.state
         ))
