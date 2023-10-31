@@ -328,7 +328,7 @@ def payme_perform(data: dict):
     tr: PayMeTransaction = PayMeTransaction.objects.filter(transaction_id=tr_id).first()
     res = {"id": data.get("id")}
     if tr is None:
-        res["error"] = dict(code=-31003)
+        res["error"] = PaymeErrors.TRANS_NOT_FOUND
         return res
 
     order = tr.order
@@ -336,7 +336,7 @@ def payme_perform(data: dict):
         if tr.create_time + datetime.timedelta(hours=12) < timezone.now():
             order.status = Order.Status.EXPIRED
             order.save()
-            res["error"] = dict(code=-31008)
+            res["error"] = PaymeErrors.CANT_PERFORM_TRANS
             return res
 
         order.status = Order.Status.PAID
@@ -348,7 +348,7 @@ def payme_perform(data: dict):
         if order.status == Order.Status.PAID:
             res["result"] = dict(transaction=str(tr.id), perform_time=int(tr.perform_time.timestamp()), state=2)
         else:
-            res["error"] = dict(code=-31008)
+            res["error"] = PaymeErrors.CANT_PERFORM_TRANS
     return res
 
 
@@ -356,7 +356,7 @@ def payme_cancel(data: dict):
     tr: PayMeTransaction = PayMeTransaction.objects.filter(transaction_id=data["params"]["id"]).first()
     res = {"id": data.get("id")}
     if tr is None:
-        res["error"] = dict(code=-31003)
+        res["error"] = PaymeErrors.TRANS_NOT_FOUND
         return res
 
     order = tr.order
@@ -369,7 +369,7 @@ def payme_cancel(data: dict):
 
         res["result"] = dict(state=-1, transaction=str(tr.id), cancel_time=int(tr.cancel_time.timestamp()))
     elif order.status == Order.Status.PAID:
-        res["error"] = dict(code=-31007)
+        res["error"] = PaymeErrors.CANT_CANCEL_TRANSACTION
     else:
         order.status = Order.Status.CANCELLED
         order.save()
@@ -384,7 +384,7 @@ def payme_check_transaction(data: dict[dict]):
     res = {"id": data.get("id")}
 
     if tr is None:
-        res["error"] = dict(code=-31003)
+        res["error"] = PaymeErrors.TRANS_NOT_FOUND
     else:
         order = tr.order
         state = order.status + 1
