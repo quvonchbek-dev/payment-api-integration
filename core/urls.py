@@ -1,9 +1,7 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.template.defaulttags import url
-from django.urls import path, include
-from payment_api.rpc_views import api
+from django.urls import path
 
 from payment_api.views import check_payment, process_payment, click_prepare, click_complete, payme_all
 

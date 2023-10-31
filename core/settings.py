@@ -12,7 +12,7 @@ SECRET_KEY = 'django-insecure-%)i*4d(iwa0jn&x)gbr*wxgqyh^vkc-u$hgko1mhiewa+0d5yf
 DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
-
+CSRF_TRUSTED_ORIGINS = ["https://logitsmart.uz"]
 # Application definition
 
 INSTALLED_APPS = [

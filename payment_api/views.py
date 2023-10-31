@@ -379,7 +379,7 @@ def payme_cancel(data: dict):
     return res
 
 
-def payme_check_transaction(data: dict[dict]):
+def payme_check_transaction(data):
     tr: PayMeTransaction = PayMeTransaction.objects.filter(transaction_id=data["params"]["id"]).first()
     res = {"id": data.get("id")}
 
@@ -400,7 +400,7 @@ def payme_check_transaction(data: dict[dict]):
     return res
 
 
-def payme_get_statement(data: dict[dict]):
+def payme_get_statement(data):
     params = data["params"]
     start = datetime.datetime.fromtimestamp(params["from"])
     end = datetime.datetime.fromtimestamp(params["to"])
