@@ -28,7 +28,7 @@ class ClickPaymentAdmin(admin.ModelAdmin):
 
 
 class PayMeTransactionAdmin(admin.ModelAdmin):
-    list_display = ["id", "order", "status", "perform_time"]
+    list_display = ["id", "transaction_id", "order", "status", "reason", "perform_time",]
 
     def status(self, obj: PayMeTransaction):
         return ["NULL", "WAITING", "PAID", "CANCELLED 2", "CANCELLED 1"][obj.state]
