@@ -374,16 +374,17 @@ def payme_cancel(data: dict):
     if tr.state == 1:
         order.status = Order.Status.CANCELLED
         order.save()
-
         tr.cancel_time = int(timezone.now().timestamp() * 1000)
         tr.state = -1
         tr.reason = data["params"].get("reason")
         tr.save()
     elif tr.state == 2:
         res["error"] = PaymeErrors.CANT_CANCEL_TRANSACTION
+        return res
     else:
         tr.state = -2
         tr.reason = data["params"].get("reason")
+        tr.save()
     res["result"] = dict(state=tr.state, transaction=str(tr.id), cancel_time=tr.cancel_time)
     return res
 
