@@ -356,6 +356,7 @@ def payme_perform(data: dict):
         tr.state = 2
         tr.save()
         res["result"] = dict(transaction=str(tr.id), perform_time=tr.perform_time, state=2)
+        successful_payment(order)
     elif tr.state == 2:
         res["result"] = dict(transaction=str(tr.id), perform_time=tr.perform_time, state=2)
     else:
