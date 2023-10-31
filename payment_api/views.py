@@ -376,13 +376,16 @@ def cancel_trans(tr: PayMeTransaction, state, reason):
 def payme_cancel(data: dict):
     tr: PayMeTransaction = PayMeTransaction.objects.filter(transaction_id=data["params"]["id"]).first()
     res = {"id": data.get("id")}
+    reason = data["params"].get("reason")
     if tr is None:
         res["error"] = PaymeErrors.TRANS_NOT_FOUND
         return res
     if tr.state == 1:
-        cancel_trans(tr, -1, data["params"].get("reason"))
+        cancel_trans(tr, -1, reason)
+    elif tr.state == 2:
+        cancel_trans(tr, -2, reason)
     elif tr.state < 0:
-        tr.reason = data["params"].get("reason")
+        tr.reason = reason
         tr.save()
     res["result"] = dict(state=tr.state, transaction=str(tr.id), cancel_time=tr.cancel_time)
     return res
