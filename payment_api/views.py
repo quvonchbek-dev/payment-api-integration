@@ -1,18 +1,26 @@
+import base64
 import datetime
 import hashlib
+import json
 import os
 
+from django.core.handlers.wsgi import WSGIRequest
 from django.db.models import QuerySet
 from django.http import JsonResponse
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from dotenv import load_dotenv
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from payment_api.enums import PaymeErrors
 from payment_api.models import Order, Payment, ClickPayment, PayMeTransaction
 from payment_api.serializers import CheckPaymentSerializerUzum, PaymentSerializer, ClickPrepareSerializer, \
-    ClickCompleteSerializer, PaymeSerializer
+    ClickCompleteSerializer
 from payment_api.utils import successful_payment
+
+load_dotenv('../.env')
 
 
 @api_view(['POST'])
@@ -252,37 +260,34 @@ def click_complete(request):
 PAYME INTEGRATION - https://developer.help.paycom.uz/metody-merchant-api/
 """
 
-PaymeCustomErrors = {
-    -31050: dict(ru="Заказ не найден", uz="Buyurtma topilmadi", en="Order not found"),
-    -31051: dict(ru="Уже оплачено", uz="Allaqachon to'langan", en="Already paid"),
-    -31052: dict(ru="Срок действия заказа истек", uz="Buyurtma muddati tugagan", en="Order expired"),
-    -31053: dict(ru="Заказ отменен", uz="Buyurtma bekor qilindi", en="Order cancelled")
-}
-
 
 def check_order(order: Order):
     if order is None:
-        return -31050
+        return PaymeErrors.ORDER_NOT_FOUND
     if order.status == Order.Status.PAID:
-        return -31051
+        return PaymeErrors.ALREADY_PAID
     if order.status == Order.Status.EXPIRED:
-        return -31052
+        return PaymeErrors.ORDER_EXPIRED
     if order.status == Order.Status.CANCELLED:
-        return -31053
-    return 0
+        return PaymeErrors.ORDER_CANCELLED
 
 
 def payme_check_perform(data: dict):
     params = data["params"]
-    order_id = params["account"]["id"]
+    res = {"id": data.get("id")}
+    order_id = params["account"].get("id")
+
+    if order_id is None:
+        res["error"] = PaymeErrors.JSON_RPC_ERROR
+        return res
+
     order = Order.objects.filter(pk=order_id).first()
     amount = params.get("amount")
-    res = {"id": data.get("id")}
-    error_code = check_order(order)
-    if error_code:
-        res["error"] = dict(code=error_code, message=PaymeCustomErrors[error_code])
+    error = check_order(order)
+    if error:
+        res["error"] = error
     elif order.amount * 100 != amount:
-        res["error"] = dict(code=-31001)
+        res["error"] = PaymeErrors.WRONG_AMOUNT
     else:
         res["result"] = dict(allow=True)
     return res
@@ -299,7 +304,7 @@ def payme_create(data: dict):
         order = Order.objects.filter(pk=params["account"]["id"]).first()
         tr = PayMeTransaction.objects.create(
             transaction_id=params["id"],
-            time=timezone.datetime.fromtimestamp(params['time']),
+            time=timezone.datetime.fromtimestamp(params['time'] / 1000),
             create_time=timezone.now(),
             order=order)
         successful_payment(order)
@@ -310,8 +315,8 @@ def payme_create(data: dict):
         if expired and order.status == Order.Status.WAITING:
             order.status = Order.Status.EXPIRED
             order.save()
-        if order.status != Order.Status.WAITING:
-            res["error"] = dict(code=-31008)
+        if order.status == Order.Status.WAITING:
+            res["error"] = PaymeErrors.CANT_PERFORM_TRANS
             return res
 
     res["result"] = dict(create_time=int(tr.create_time.timestamp()), transaction=str(tr.id), state=1)
@@ -386,9 +391,9 @@ def payme_check_transaction(data: dict[dict]):
         if order.status > Order.Status.PAID:
             state = -1 - (order.status == Order.Status.EXPIRED)
         res["result"] = dict(
-            create_time=int(tr.create_time.timestamp()),
-            perform_time=int(tr.perform_time.timestamp()) if order.status == Order.Status.PAID else 0,
-            cancel_time=int(tr.perform_time.timestamp()) if order.status == Order.Status.CANCELLED else 0,
+            create_time=tr.create_time.timestamp() * 1000,
+            perform_time=tr.perform_time.timestamp() * 1000 if order.status == Order.Status.PAID else 0,
+            cancel_time=tr.perform_time.timestamp() * 1000 if order.status == Order.Status.CANCELLED else 0,
             transaction=str(tr.id),
             state=state
         )
@@ -422,28 +427,49 @@ def payme_get_statement(data: dict[dict]):
     return dict(result=dict(transactions=transactions))
 
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def payme_all(request):
-    sz = PaymeSerializer(data=request.data)
-    sz.is_valid(raise_exception=True)
+def check_request(request: WSGIRequest):
+    if request.method != "POST":
+        return PaymeErrors.INVALID_HTTP_METHOD
 
-    data = sz.validated_data
+    auth_token = request.headers.get("Authorization")
+    if auth_token is None:
+        return PaymeErrors.AUTH_ERROR
+
+    auth = base64.b64decode(auth_token.split()[1]).decode("utf-8")
+    if auth != os.getenv('PAYME_TEST_LOGIN') + ":" + os.getenv('PAYME_TEST_KEY'):
+        return PaymeErrors.AUTH_ERROR
+
+    try:
+        data = json.loads(request.body.decode("utf-8"))
+    except json.decoder.JSONDecodeError:
+        return dict(error=PaymeErrors.PARSING_JSON)
+
+    if not ("method" in data or "params" in data):
+        return PaymeErrors.JSON_RPC_ERROR
+
+    return False
+
+
+@csrf_exempt
+def payme_all(request: WSGIRequest):
+    error = check_request(request)
+    if error:
+        return JsonResponse(dict(error=error))
+
+    data = json.loads(request.body.decode("utf-8"))
     method = data["method"]
 
     if method == "CreateTransaction":
-        return Response(payme_create(data))
+        return JsonResponse(payme_create(data))
     elif method == "PerformTransaction":
-        return Response(payme_perform(data))
+        return JsonResponse(payme_perform(data))
     elif method == "CheckPerformTransaction":
-        return Response(payme_check_perform(data))
+        return JsonResponse(payme_check_perform(data))
     elif method == "CancelTransaction":
-        return Response(payme_cancel(data))
+        return JsonResponse(payme_cancel(data))
     elif method == "CheckTransaction":
-        return Response(payme_check_transaction(data))
+        return JsonResponse(payme_check_transaction(data))
     elif method == "GetStatement":
-        return Response(payme_get_statement(data))
-    elif method == "SetFiscalData":
-        pass
+        return JsonResponse(payme_get_statement(data))
 
-    return Response(dict(error=dict(code=-32601), id=data["id"]))
+    return JsonResponse(dict(error=PaymeErrors.METHOD_NOT_FOUND, id=data["id"]))
