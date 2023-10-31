@@ -319,7 +319,7 @@ def payme_create(data: dict):
             res["error"] = PaymeErrors.CANT_PERFORM_TRANS
             return res
 
-    res["result"] = dict(create_time=int(tr.create_time.timestamp()), transaction=str(tr.id), state=1)
+    res["result"] = dict(create_time=int(tr.create_time.timestamp() * 1000), transaction=str(tr.id), state=1)
     return res
 
 
