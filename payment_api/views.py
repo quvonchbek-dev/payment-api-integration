@@ -401,7 +401,8 @@ def payme_check_transaction(data):
             perform_time=int(tr.perform_time.timestamp() * 1000) if order.status == Order.Status.PAID else 0,
             cancel_time=int(tr.perform_time.timestamp() * 1000) if order.status == Order.Status.CANCELLED else 0,
             transaction=str(tr.id),
-            state=state
+            state=state,
+            reason=None
         )
     return res
 
